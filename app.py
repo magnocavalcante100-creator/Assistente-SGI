@@ -8,7 +8,7 @@ st.title("👷 Assistente SGI - Infinity")
 st.markdown("Consulte as normas do Sistema de Gestão Integrada. Sistema com auto-retry e leitura integral.")
 
 # 2. Conexão com a API do Google
-API_KEY = 'AQ.Ab8RN6LbqWZ6Z0IAIq8aE9RHskZ9VFPCY2bjcbu6XTOzwWZT5g'
+API_KEY = st.secrets["AQ.Ab8RN6LbqWZ6Z0IAIq8aE9RHskZ9VFPCY2bjcbu6XTOzwWZT5g"]
 client = genai.Client(api_key=API_KEY)
 
 # 3. Carregamento Inteligente (O @st.cache_data impede que o arquivo seja lido a cada pergunta, tornando-o super rápido)
