@@ -2,19 +2,19 @@ import streamlit as st
 from google import genai
 import time
 
-# 1. Configuração visual do aplicativo
+# 1. Configuração visual
 st.set_page_config(page_title="Assistente SGI - Moura Dubeux", page_icon="👷")
 st.title("👷 Assistente SGI - Infinity")
 st.markdown("Consulte as normas do Sistema de Gestão Integrada. Sistema com auto-retry e leitura integral.")
 
-# 2. Conexão com a API do Google
+# 2. Conexão com o Google (Buscando a chave do cofre e contornando o erro AQ.)
 API_KEY = st.secrets["GEMINI_API_KEY"]
 client = genai.Client(
     api_key=API_KEY,
     http_options={'headers': {'x-goog-api-key': API_KEY}}
 )
 
-# 3. Carregamento Inteligente (O @st.cache_data impede que o arquivo seja lido a cada pergunta, tornando-o super rápido)
+# 3. Carregamento do Banco de Dados
 @st.cache_data
 def carregar_sgi():
     try:
@@ -25,24 +25,21 @@ def carregar_sgi():
 
 sgi_texto_integral = carregar_sgi()
 
-# 4. Criação da memória contínua do chat
+# 4. Memória do Chat
 if "mensagens" not in st.session_state:
     st.session_state.mensagens = []
 
-# Exibe o histórico de conversa na tela
 for msg in st.session_state.mensagens:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# 5. Caixa de entrada e processamento
+# 5. Processamento da Pergunta
 if pergunta := st.chat_input("Digite sua dúvida (Ex: PES 28 ou Escavação da piscina)..."):
     
-    # Mostra a pergunta na tela e salva na memória
     with st.chat_message("user"):
         st.markdown(pergunta)
     st.session_state.mensagens.append({"role": "user", "content": pergunta})
 
-    # Formata o histórico para a inteligência artificial entender a linha de raciocínio
     historico_formatado = ""
     for m in st.session_state.mensagens:
         quem = "Usuário" if m["role"] == "user" else "Assistente"
@@ -54,8 +51,8 @@ if pergunta := st.chat_input("Digite sua dúvida (Ex: PES 28 ou Escavação da p
     
     SUA MISSÃO É ALIAR PRECISÃO COM INTELIGÊNCIA:
     1. PRECISÃO CIRÚRGICA: Se o usuário perguntar sobre um termo exato, PES específica ou métrica, rastreie o documento, entregue o dado real e cite o [ARQUIVO] de origem.
-    2. INTELIGÊNCIA SEMÂNTICA: Se o serviço for atípico (ex: piscina) ou necessitar de interpretação, aja como engenheiro. Cruze as normas e justifique tecnicamente como o SGI ampara o serviço.
-    3. TOM E FORMATO: Seja cordial, didático e consultivo. Explique o "porquê" das coisas. Organize suas respostas com listas e tópicos.
+    2. INTELIGÊNCIA SEMÂNTICA: Se o serviço for atípico ou necessitar de interpretação, aja como engenheiro. Cruze as normas e justifique.
+    3. TOM E FORMATO: Seja cordial, didático e consultivo.
     
     HISTÓRICO DA CONVERSA:
     {historico_formatado}
@@ -70,7 +67,6 @@ if pergunta := st.chat_input("Digite sua dúvida (Ex: PES 28 ou Escavação da p
         resposta_ui = st.empty()
         resposta_ui.markdown("⏳ *Analisando a base do SGI...*")
         
-        # Sistema de Auto-Retry Invisível
         max_tentativas = 3
         resposta_final = ""
         
@@ -87,11 +83,9 @@ if pergunta := st.chat_input("Digite sua dúvida (Ex: PES 28 ou Escavação da p
                 if ("503" in erro_str or "UNAVAILABLE" in erro_str) and tentativa < max_tentativas - 1:
                     time.sleep(3)
                     continue
-                resposta_final = f"⚠️ Instabilidade no servidor do Google. Erro: {erro_str}\n\nPor favor, tente novamente."
+                resposta_final = f"⚠️ Instabilidade. Erro: {erro_str}\n\nPor favor, tente novamente."
                 break
         
-        # Atualiza a tela com a resposta definitiva
         resposta_ui.markdown(resposta_final)
         
-    # Salva a resposta da IA na memória
     st.session_state.mensagens.append({"role": "assistant", "content": resposta_final})
