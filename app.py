@@ -6,7 +6,7 @@ import re
 # 1. Configuração visual
 st.set_page_config(page_title="Assistente SGI - Moura Dubeux", page_icon="👷")
 st.title("👷 Assistente SGI - Infinity")
-st.markdown("Consulta com Inteligência Híbrida. Rápido e sem limites de cota!")
+st.markdown("Consulta com Arquitetura de Fatiamento. Rápido, leve e imune a travamentos.")
 
 # 2. Conexão com o Google
 API_KEY = st.secrets["GEMINI_API_KEY"]
@@ -15,59 +15,74 @@ client = genai.Client(
     http_options={'headers': {'x-goog-api-key': API_KEY}}
 )
 
-# 3. Carregamento e Fatiamento do Banco de Dados
+# 3. NOVO SISTEMA: Fatiamento do Arquivo (Evita estouro de Memória RAM)
 @st.cache_data
-def carregar_sgi():
+def carregar_e_fatiar_sgi():
     try:
         with open('SGI_Completo.txt', 'r', encoding='utf-8') as f:
             texto = f.read()
-            # O Python corta o arquivão em uma lista, separando cada PES individualmente
-            normas = texto.split("[ARQUIVO:")
-            return normas
+        
+        # Divide por arquivos primeiro
+        arquivos_brutos = texto.split("[ARQUIVO:")
+        pedacos = []
+        
+        for arq in arquivos_brutos:
+            if len(arq.strip()) < 10: continue
+            
+            linhas = arq.split("\n", 1)
+            nome_arq = linhas[0].replace("]", "").strip()
+            conteudo = linhas[1] if len(linhas) > 1 else ""
+            
+            # Corta o conteúdo da norma em pedaços leves de 2000 caracteres
+            tamanho_pedaco = 2000
+            for i in range(0, len(conteudo), tamanho_pedaco):
+                trecho = conteudo[i:i+tamanho_pedaco]
+                pedacos.append({"arquivo": nome_arq, "texto": trecho})
+                
+        return pedacos
     except Exception as e:
         return []
 
-lista_normas = carregar_sgi()
+lista_pedacos = carregar_e_fatiar_sgi()
 
-# =====================================================================
-# O NOVO MOTOR DE BUSCA (REDUZ O GASTO DE TOKENS EM 95%)
-# =====================================================================
-def buscar_normas_relevantes(pergunta, normas):
-    if not normas:
-        return "Erro: Base de dados vazia."
-        
-    # Extrai as palavras principais da pergunta do usuário
+# 4. BUSCA CIRÚRGICA NOS PEDAÇOS (Gasta quase nada da cota do Google)
+def buscar_melhores_trechos(pergunta, pedacos):
+    if not pedacos: return "Base de dados vazia."
+    
+    # Extrai as palavras que você digitou
     palavras_chave = [p.lower() for p in re.findall(r'\b\w+\b', pergunta) if len(p) > 2]
     
-    pontuacoes = []
-    for norma in normas:
-        norma_lower = norma.lower()
+    for pedaco in pedacos:
+        texto_lower = pedaco["texto"].lower()
         pontuacao = 0
-        
-        # Pontua a norma se ela tiver as palavras que o usuário digitou
         for palavra in palavras_chave:
-            pontuacao += norma_lower.count(palavra)
+            pontuacao += texto_lower.count(palavra)
         
-        # Super-Bônus para buscas exatas (Resolve o problema da PES 28)
-        if "pes 28" in pergunta.lower() and ("pes 28" in norma_lower or "pes_28" in norma_lower):
-            pontuacao += 1000
+        # Bônus para buscas críticas da engenharia
+        if "pes 28" in pergunta.lower() and ("pes 28" in texto_lower or "pes_28" in texto_lower):
+            pontuacao += 50
+        if "esgoto" in pergunta.lower() and "ramal" in pergunta.lower() and "esgoto" in texto_lower and "ramal" in texto_lower:
+            pontuacao += 20
             
-        pontuacoes.append((pontuacao, norma))
+        pedaco["pontuacao"] = pontuacao
         
-    # Organiza o ranking e seleciona apenas as 3 PES mais relevantes
-    pontuacoes.sort(key=lambda x: x[0], reverse=True)
-    textos_selecionados = ""
-    for pontuacao, norma in pontuacoes[:3]:
-        if pontuacao > 0:
-            textos_selecionados += "\n\n[ARQUIVO:" + norma
+    # Organiza do melhor para o pior
+    pedacos_ordenados = sorted(pedacos, key=lambda x: x["pontuacao"], reverse=True)
+    
+    # Separa APENAS os 5 melhores recortes para mandar para a IA
+    melhores = pedacos_ordenados[:5]
+    
+    resultado = ""
+    for m in melhores:
+        if m["pontuacao"] > 0:
+            resultado += f"\n\n--- FONTE: {m['arquivo']} ---\n{m['texto']}...\n"
             
-    # Fallback caso a pergunta seja muito genérica
-    if not textos_selecionados.strip():
-        textos_selecionados = "\n\n[ARQUIVO:" + (normas[1][:5000] if len(normas) > 1 else "Nada encontrado.")
+    if not resultado.strip():
+        resultado = "Nenhuma norma específica encontrada sobre isso. Peça mais detalhes."
         
-    return textos_selecionados
+    return resultado
 
-# 4. Memória do Chat
+# 5. Memória Leve do Chat
 if "mensagens" not in st.session_state:
     st.session_state.mensagens = []
 
@@ -75,58 +90,43 @@ for msg in st.session_state.mensagens:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# 5. Processamento da Pergunta
-if pergunta := st.chat_input("Digite sua dúvida (Ex: PES 28 ou ramal de esgoto)..."):
+if pergunta := st.chat_input("Ex: Qual PES fala sobre ramal de esgoto?"):
     
     with st.chat_message("user"):
         st.markdown(pergunta)
     st.session_state.mensagens.append({"role": "user", "content": pergunta})
 
-    # Reduzimos o histórico para as últimas 4 mensagens para economizar cota
+    # Puxa apenas a sua última pergunta para não pesar a memória
     historico_formatado = ""
-    for m in st.session_state.mensagens[-4:]:
+    for m in st.session_state.mensagens[-2:]: 
         quem = "Usuário" if m["role"] == "user" else "Assistente"
         historico_formatado += f"\n{quem}: {m['content']}\n"
 
     with st.chat_message("assistant"):
         resposta_ui = st.empty()
-        resposta_ui.markdown("🔎 *Garimpando as PES e analisando...*")
+        resposta_ui.markdown("🔎 *Escaneando as normas e processando...*")
         
-        # ACIONA O FILTRO ANTES DE MANDAR PARA A INTELIGÊNCIA ARTIFICIAL
-        sgi_filtrado = buscar_normas_relevantes(pergunta, lista_normas)
+        trechos_filtrados = buscar_melhores_trechos(pergunta, lista_pedacos)
         
         prompt = f"""
-        Você é um Engenheiro de Produção Sênior, consultor de qualidade da obra.
-        Responda à dúvida do usuário usando APENAS as NORMAS SGI FILTRADAS abaixo.
-        Seja prático. Cite a PES.
+        Você é Engenheiro de Produção, atuando como consultor de qualidade da obra.
+        Responda à dúvida do usuário com base EXCLUSIVAMENTE nos trechos do SGI abaixo.
+        Seja prático e SEMPRE cite a Fonte (nome do arquivo) logo no início da sua explicação.
         
-        HISTÓRICO RECENTE:
-        {historico_formatado}
-        
-        NORMAS SGI FILTRADAS PARA ESTA PERGUNTA:
-        {sgi_filtrado}
+        TRECHOS DO SGI ENCONTRADOS:
+        {trechos_filtrados}
         
         PERGUNTA DO USUÁRIO: {pergunta}
         """
         
-        max_tentativas = 3
-        resposta_final = ""
-        
-        for tentativa in range(max_tentativas):
-            try:
-                resposta = client.models.generate_content(
-                    model='gemini-2.5-flash',
-                    contents=prompt
-                )
-                resposta_final = resposta.text
-                break
-            except Exception as e:
-                erro_str = str(e)
-                if ("503" in erro_str or "UNAVAILABLE" in erro_str) and tentativa < max_tentativas - 1:
-                    time.sleep(3)
-                    continue
-                resposta_final = f"⚠️ Erro de API. Detalhe: {erro_str}\n\nPor favor, tente novamente."
-                break
+        try:
+            resposta = client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=prompt
+            )
+            resposta_final = resposta.text
+        except Exception as e:
+            resposta_final = f"⚠️ Erro de servidor. Detalhe: {str(e)}"
         
         resposta_ui.markdown(resposta_final)
         
