@@ -9,7 +9,10 @@ st.markdown("Consulte as normas do Sistema de Gestão Integrada. Sistema com aut
 
 # 2. Conexão com a API do Google
 API_KEY = st.secrets["GEMINI_API_KEY"]
-client = genai.Client(api_key=API_KEY)
+client = genai.Client(
+    api_key=API_KEY,
+    http_options={'headers': {'x-goog-api-key': API_KEY}}
+)
 
 # 3. Carregamento Inteligente (O @st.cache_data impede que o arquivo seja lido a cada pergunta, tornando-o super rápido)
 @st.cache_data
